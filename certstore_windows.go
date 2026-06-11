@@ -27,6 +27,20 @@ char* errMsg(DWORD code) {
 		return lpMsgBuf;
 	}
 }
+
+// openCertStore wraps CertOpenStore so the CERT_STORE_PROV_SYSTEM_W provider
+// sentinel is materialized entirely in C. That constant is ((LPCSTR)10) — a
+// pointer-typed value holding the integer 10. Passing it directly from Go puts
+// 10 into a pointer-typed argument slot that cgo records in the goroutine's
+// stack pointer map. If the Go runtime copies the stack (grow/shrink) while
+// that cgo call frame is live, the stack scanner finds 10 in a "pointer" slot,
+// treats it as a corrupt pointer (0 < 10 < minLegalPointer = 4096), and fatally
+// aborts with "invalid pointer found on stack". Constructing the call in C
+// keeps the sentinel out of every Go pointer slot. Do not inline this back into
+// a Go-level C.CertOpenStore call.
+HCERTSTORE openCertStore(DWORD location, void* name) {
+	return CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, location, name);
+}
 */
 import "C"
 
@@ -85,7 +99,7 @@ func openSysStore() (*winStore, error) {
 	storeName := unsafe.Pointer(stringToUTF16("MY"))
 	defer C.free(storeName)
 
-	store := C.CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, C.CERT_SYSTEM_STORE_LOCAL_MACHINE, storeName)
+	store := C.openCertStore(C.CERT_SYSTEM_STORE_LOCAL_MACHINE, storeName)
 	if store == nil {
 		return nil, lastError("failed to open system cert store")
 	}
@@ -98,7 +112,7 @@ func openStore() (*winStore, error) {
 	storeName := unsafe.Pointer(stringToUTF16("MY"))
 	defer C.free(storeName)
 
-	store := C.CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, C.CERT_SYSTEM_STORE_CURRENT_USER, storeName)
+	store := C.openCertStore(C.CERT_SYSTEM_STORE_CURRENT_USER, storeName)
 	if store == nil {
 		return nil, lastError("failed to open system cert store")
 	}
