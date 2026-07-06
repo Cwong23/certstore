@@ -274,7 +274,7 @@ func (i *macIdentity) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 	}
 	defer C.CFRelease(C.CFTypeRef(cdigest))
 
-	algo, err := i.getAlgo(hash)
+	algo, err := i.getAlgo(hash, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,8 @@ func (i *macIdentity) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 }
 
 // getAlgo decides which algorithm to use with this key type for the given hash.
-func (i *macIdentity) getAlgo(hash crypto.Hash) (algo C.SecKeyAlgorithm, err error) {
+// If opts is *rsa.PSSOptions, PSS padding is used; otherwise PKCS1v15.
+func (i *macIdentity) getAlgo(hash crypto.Hash, opts crypto.SignerOpts) (algo C.SecKeyAlgorithm, err error) {
 	var crt *x509.Certificate
 	if crt, err = i.Certificate(); err != nil {
 		return
@@ -322,17 +323,37 @@ func (i *macIdentity) getAlgo(hash crypto.Hash) (algo C.SecKeyAlgorithm, err err
 			err = ErrUnsupportedHash
 		}
 	case *rsa.PublicKey:
-		switch hash {
-		case crypto.SHA1:
-			algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA1
-		case crypto.SHA256:
-			algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA256
-		case crypto.SHA384:
-			algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA384
-		case crypto.SHA512:
-			algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA512
-		default:
-			err = ErrUnsupportedHash
+		// Check if PSS was explicitly requested
+		_, pss := opts.(*rsa.PSSOptions)
+
+		if pss {
+			// Use PSS padding
+			switch hash {
+			case crypto.SHA1:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPSSSHA1
+			case crypto.SHA256:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPSSSHA256
+			case crypto.SHA384:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPSSSHA384
+			case crypto.SHA512:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPSSSHA512
+			default:
+				err = ErrUnsupportedHash
+			}
+		} else {
+			// Use PKCS1v15 padding (default, backwards compatible)
+			switch hash {
+			case crypto.SHA1:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA1
+			case crypto.SHA256:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA256
+			case crypto.SHA384:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA384
+			case crypto.SHA512:
+				algo = C.kSecKeyAlgorithmRSASignatureDigestPKCS1v15SHA512
+			default:
+				err = ErrUnsupportedHash
+			}
 		}
 	default:
 		err = errors.New("unsupported key type")
